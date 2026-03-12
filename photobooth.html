@@ -54,6 +54,7 @@ height:100%;
 background:white;
 opacity:0;
 pointer-events:none;
+transition:0.2s;
 }
 
 .controls{
@@ -103,12 +104,12 @@ margin-top:20px;
 <body>
 
 <div id="topbar">
-📸 PHOTObooth KIOSK PRO
+📸 PHOTOBOOTH KIOSK PRO
 </div>
 
 <div id="cameraBox">
 
-<video id="video" autoplay></video>
+<video id="video" autoplay playsinline></video>
 
 <div id="count"></div>
 
@@ -125,7 +126,7 @@ margin-top:20px;
 <option value="yellow">Khung vàng</option>
 </select>
 
-<select id="filter">
+<select id="filter" onchange="updateFilter()">
 <option value="none">Không filter</option>
 <option value="grayscale(1)">Đen trắng</option>
 <option value="sepia(1)">Vintage</option>
@@ -136,13 +137,12 @@ margin-top:20px;
 <br>
 
 <button onclick="startShoot()">📸 BẮT ĐẦU CHỤP</button>
-
 <button onclick="enterFullscreen()">🖥 KIOSK</button>
 
 </div>
 
 <div id="result">
-<canvas id="canvas"></canvas>
+<canvas id="canvas" width="420" height="1280"></canvas>
 </div>
 
 <br>
@@ -161,10 +161,25 @@ const flash=document.getElementById("flash")
 
 let photos=[]
 
+/* CAMERA */
+
 navigator.mediaDevices.getUserMedia({video:true})
 .then(stream=>{
 video.srcObject=stream
 })
+.catch(err=>{
+alert("Không mở được camera")
+console.log(err)
+})
+
+/* FILTER PREVIEW */
+
+function updateFilter(){
+let f=document.getElementById("filter").value
+video.style.filter=f
+}
+
+/* START SHOOT */
 
 async function startShoot(){
 
@@ -186,11 +201,12 @@ uploadAndQR()
 
 }
 
+/* TAKE PHOTO */
+
 function takePhoto(){
 
 flash.style.opacity=1
-
-setTimeout(()=>flash.style.opacity=0,150)
+setTimeout(()=>flash.style.opacity=0,200)
 
 let temp=document.createElement("canvas")
 
@@ -208,6 +224,8 @@ t.drawImage(video,0,0,400,300)
 photos.push(temp)
 
 }
+
+/* MAKE PHOTO STRIP */
 
 function makeStrip(){
 
@@ -236,6 +254,8 @@ ctx.drawImage(photos[i],10,10+i*310,400,300)
 
 }
 
+/* COUNTDOWN */
+
 function countdown(){
 
 return new Promise(resolve=>{
@@ -257,7 +277,7 @@ count.innerText="📸"
 setTimeout(()=>{
 count.innerText=""
 resolve()
-},300)
+},400)
 
 }else{
 
@@ -275,6 +295,8 @@ function sleep(ms){
 return new Promise(r=>setTimeout(r,ms))
 }
 
+/* DOWNLOAD */
+
 function download(){
 
 let link=document.createElement("a")
@@ -287,7 +309,13 @@ link.click()
 
 }
 
+/* UPLOAD + QR */
+
 async function uploadAndQR(){
+
+document.getElementById("qr").innerHTML="Đang tạo QR..."
+
+try{
 
 let base64=canvas.toDataURL("image/png").split(",")[1]
 
@@ -295,7 +323,7 @@ let form=new FormData()
 
 form.append("image",base64)
 
-/* THAY API KEY Ở ĐÂY */
+/* API KEY */
 form.append("key","YOUR_IMGBB_API_KEY")
 
 let res=await fetch("https://api.imgbb.com/1/upload",{
@@ -315,11 +343,21 @@ width:200,
 height:200
 })
 
+}catch{
+
+document.getElementById("qr").innerHTML="Không tạo được QR (chưa có API KEY)"
+
 }
+
+}
+
+/* FULLSCREEN */
 
 function enterFullscreen(){
 
+if(document.documentElement.requestFullscreen){
 document.documentElement.requestFullscreen()
+}
 
 }
 
