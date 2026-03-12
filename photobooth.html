@@ -142,7 +142,7 @@ margin-top:20px;
 </div>
 
 <div id="result">
-<canvas id="canvas" width="420" height="1280"></canvas>
+<canvas id="canvas"></canvas>
 </div>
 
 <br>
@@ -168,18 +168,20 @@ navigator.mediaDevices.getUserMedia({video:true})
 video.srcObject=stream
 })
 .catch(err=>{
-alert("Không mở được camera")
+alert("Không mở được camera. Hãy cho phép quyền camera.")
 console.log(err)
 })
 
 /* FILTER PREVIEW */
 
 function updateFilter(){
+
 let f=document.getElementById("filter").value
 video.style.filter=f
+
 }
 
-/* START SHOOT */
+/* CHỤP 4 ẢNH */
 
 async function startShoot(){
 
@@ -197,15 +199,16 @@ await sleep(500)
 
 makeStrip()
 
-uploadAndQR()
+createQR()
 
 }
 
-/* TAKE PHOTO */
+/* CHỤP ẢNH */
 
 function takePhoto(){
 
 flash.style.opacity=1
+
 setTimeout(()=>flash.style.opacity=0,200)
 
 let temp=document.createElement("canvas")
@@ -225,7 +228,7 @@ photos.push(temp)
 
 }
 
-/* MAKE PHOTO STRIP */
+/* GHÉP ẢNH */
 
 function makeStrip(){
 
@@ -254,7 +257,7 @@ ctx.drawImage(photos[i],10,10+i*310,400,300)
 
 }
 
-/* COUNTDOWN */
+/* ĐẾM NGƯỢC */
 
 function countdown(){
 
@@ -309,45 +312,19 @@ link.click()
 
 }
 
-/* UPLOAD + QR */
+/* TẠO QR */
 
-async function uploadAndQR(){
-
-document.getElementById("qr").innerHTML="Đang tạo QR..."
-
-try{
-
-let base64=canvas.toDataURL("image/png").split(",")[1]
-
-let form=new FormData()
-
-form.append("image",base64)
-
-/* API KEY */
-form.append("key","YOUR_IMGBB_API_KEY")
-
-let res=await fetch("https://api.imgbb.com/1/upload",{
-method:"POST",
-body:form
-})
-
-let data=await res.json()
-
-let url=data.data.url
+function createQR(){
 
 document.getElementById("qr").innerHTML=""
 
+let data=canvas.toDataURL()
+
 new QRCode(document.getElementById("qr"),{
-text:url,
+text:data,
 width:200,
 height:200
 })
-
-}catch{
-
-document.getElementById("qr").innerHTML="Không tạo được QR (chưa có API KEY)"
-
-}
 
 }
 
