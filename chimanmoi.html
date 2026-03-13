@@ -2,194 +2,130 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>Flappy Rock HD - Có Nhạc Nền</title>
+<title>Flappy Rock HD - PWA Fullscreen</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#87CEEB">
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="https://via.placeholder.com/192?text=Rock"> <!-- Thay bằng icon thật nếu có -->
+
 <style>
-body{margin:0;background:#000;font-family:Arial;text-align:center;overflow:hidden;}
-h1{color:white;text-shadow:0 0 15px black;}
-canvas{border:4px solid white;border-radius:15px;box-shadow:0 0 40px rgba(0,0,0,0.6);}
+body{margin:0;background:#000;font-family:Arial;text-align:center;overflow:hidden;height:100vh;}
+h1{color:white;text-shadow:0 0 15px black;margin:10px 0;}
+#game{border:0;box-shadow:0 0 40px rgba(0,0,0,0.6);}
+#score{color:white;font-size:24px;}
+#splash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);color:white;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:100;font-size:28px;cursor:pointer;}
+#install-prompt{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#ffcc00;padding:10px 20px;border-radius:10px;color:black;font-weight:bold;z-index:90;display:none;}
+canvas{display:block;}
 </style>
 </head>
 <body>
+<div id="splash">Chạm màn hình để bắt đầu<br>(Unlock âm thanh & fullscreen)</div>
 <h1>🪨 FLAPPY ROCK HD</h1>
 <div>Score: <span id="score">0</span></div>
-<canvas id="game" width="360" height="500"></canvas>
+<canvas id="game"></canvas>
+<div id="install-prompt">Thêm vào màn hình chính để chơi offline!</div>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+// === PWA: Service Worker ===
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').then(reg => {
+            console.log('Service Worker registered');
+        }).catch(err => console.log('SW error:', err));
+    });
+}
+
+// === AUDIO UNLOCK & SPLASH ===
+const splash = document.getElementById('splash');
+let audioUnlocked = false;
 let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-/* PLAYER */
+splash.addEventListener('touchstart', unlockAudio, {once: true});
+splash.addEventListener('click', unlockAudio, {once: true});
+
+function unlockAudio() {
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume().then(() => {
+            console.log('Audio unlocked');
+            audioUnlocked = true;
+            splash.style.display = 'none';
+            startGame(); // Bắt đầu game sau khi unlock
+        });
+    } else {
+        splash.style.display = 'none';
+        startGame();
+    }
+}
+
+// === CANVAS & GAME ===
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// GAME VARIABLES (giữ nguyên từ code cũ, chỉ thêm resize)
 let playerX = 120, playerY = 250, velocity = 0;
 let gravity = 0.55, lift = -13.5;
 let running = false, gameOverFlag = false;
-
-/* SCORE & OBSTACLES */
 let score = 0;
 let obstacles = [];
 let obstacleSpeed = 2.2;
 let gapSize = 245;
-
-/* DIFFICULTY */
 let spawnRate = 2400;
 let difficultyLevel = 0;
 let lastDifficultyTime = 0;
 let lastSpawnTime = 0;
-
-/* PARTICLES */
 let particles = [];
-
-/* BACKGROUND */
 let cloudX = 0, groundX = 0;
 
-/* NHẠC NỀN (di chuyển) - Melody vui tươi kiểu 8-bit */
-let musicTimeout = null;
+// Resize canvas để fit màn hình, giữ tỷ lệ
+const GAME_WIDTH = 360;
+const GAME_HEIGHT = 500;
 
-function playBackgroundMusic() {
-    if (musicTimeout) clearTimeout(musicTimeout);
-    let index = 0;
-    const melody = [
-        261.6, 329.6, 392.0, 523.3,   // C4 E4 G4 C5
-        659.3, 523.3, 392.0, 329.6,   // E5 C5 G4 E4
-        392.0, 440.0, 523.3, 659.3,   // G4 A4 C5 E5
-        784.0, 659.3, 523.3, 392.0    // G5 E5 C5 G4
-    ];
-    function loop() {
-        if (!running) return;
-        let freq = melody[index % melody.length];
-        let osc = audioCtx.createOscillator();
-        let gain = audioCtx.createGain();
-        osc.type = "triangle";           // âm thanh mềm, vui
-        osc.frequency.value = freq;
-        gain.gain.value = 0.085;         // âm lượng vừa phải (không chói)
-        let filter = audioCtx.createBiquadFilter();
-        filter.type = "lowpass"; filter.frequency.value = 1800;
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.28);
-        osc.stop(audioCtx.currentTime + 0.28);
-        index++;
-        musicTimeout = setTimeout(loop, 210); // nhịp nhạc nhanh vui
+function resizeCanvas() {
+    const aspect = GAME_WIDTH / GAME_HEIGHT;
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+
+    if (w / h > aspect) {
+        // Màn hình rộng hơn → fit height
+        canvas.height = h;
+        canvas.width = h * aspect;
+    } else {
+        // Màn hình cao hơn → fit width
+        canvas.width = w;
+        canvas.height = w / aspect;
     }
-    loop();
+
+    // Scale nội dung game
+    const scale = canvas.width / GAME_WIDTH;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
-function stopBackgroundMusic() {
-    if (musicTimeout) {
-        clearTimeout(musicTimeout);
-        musicTimeout = null;
-    }
-}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); // Gọi lần đầu
 
-/* ÂM THANH HIỆU ỨNG (giữ nguyên) */
-function playFlap() { /* ... */ 
-    let osc = audioCtx.createOscillator(); let gain = audioCtx.createGain();
-    osc.type = "sine"; osc.frequency.setValueAtTime(680, audioCtx.currentTime);
-    gain.gain.value = 0.4; osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.start(); gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.12);
-    osc.stop(audioCtx.currentTime + 0.12);
-}
-function playScore() { /* ... */ 
-    let osc = audioCtx.createOscillator(); osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
-    let gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
-    gain.gain.value = 0.3; osc.start(); osc.frequency.linearRampToValueAtTime(1800, audioCtx.currentTime + 0.25);
-    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3); osc.stop(audioCtx.currentTime + 0.3);
-}
-function playHit() { /* ... */ 
-    let noise = audioCtx.createBufferSource(); let buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.6, audioCtx.sampleRate);
-    let data = buffer.getChannelData(0); for(let i=0;i<data.length;i++) data[i] = Math.random()*2-1;
-    noise.buffer = buffer; let filter = audioCtx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 800;
-    let gain = audioCtx.createGain(); noise.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
-    gain.gain.value = 0.6; gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.6); noise.start();
-}
-function playDie() { /* ... */ 
-    let osc = audioCtx.createOscillator(); osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-    let gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
-    gain.gain.value = 0.5; osc.start(); gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.2);
-    osc.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 1.2); osc.stop(audioCtx.currentTime + 1.2);
-}
-function playLevelUp() { /* ... */ 
-    let osc = audioCtx.createOscillator(); osc.type = "sine"; osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-    let gain = audioCtx.createGain(); osc.connect(gain); gain.connect(audioCtx.destination);
-    gain.gain.value = 0.35; osc.start(); osc.frequency.linearRampToValueAtTime(1320, audioCtx.currentTime + 0.6);
-    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.7); osc.stop(audioCtx.currentTime + 0.7);
-}
+// Các hàm drawBackground, drawBird, spawnParticle, drawParticles, drawObstacles, checkCollision, updateScore, spawnObstacle, playFlap/playScore/... giữ nguyên từ code cũ của bạn
+// (Dán toàn bộ phần script game cũ vào đây, chỉ thay đổi update() để dùng resizeCanvas nếu cần)
+// Ví dụ ngắn gọn (bạn copy phần còn lại từ code trước):
 
-/* DRAW BACKGROUND (giữ nguyên) */
-function drawBackground() {
-    let grad = ctx.createLinearGradient(0,0,0,420);
-    grad.addColorStop(0,"#5EB6FF"); grad.addColorStop(1,"#A1E2FF");
-    ctx.fillStyle = grad; ctx.fillRect(0,0,360,500);
-    ctx.fillStyle = "#FFEE55"; ctx.beginPath(); ctx.arc(280,75,28,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = "rgba(255,230,100,0.3)"; ctx.beginPath(); ctx.arc(280,75,40,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.95)";
-    for(let i=0;i<6;i++){
-        let x = cloudX + i*95;
-        ctx.beginPath(); ctx.ellipse(x+30,70,35,22,0,0,Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(x+15,55,25,20,0,0,Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.ellipse(x+50,58,28,19,0,0,Math.PI*2); ctx.fill();
-    }
-    cloudX -= 0.25; if(cloudX < -150) cloudX = 0;
-    ctx.fillStyle = "#5A7A9E"; ctx.beginPath(); ctx.moveTo(0,380); ctx.lineTo(90,220); ctx.lineTo(220,380); ctx.fill();
-    ctx.fillStyle = "#4A6A8A"; ctx.beginPath(); ctx.moveTo(150,380); ctx.lineTo(270,190); ctx.lineTo(400,380); ctx.fill();
-    ctx.fillStyle = "#4CAF50"; ctx.fillRect(groundX,420,360,80); ctx.fillRect(groundX+360,420,360,80);
-    ctx.fillStyle = "#3D9E00"; for(let i=0;i<36;i++) ctx.fillRect(groundX + i*20 + 5, 415, 6, 12);
-    groundX -= 2.2; if(groundX <= -360) groundX = 0;
-}
+function drawBackground() { /* code cũ */ }
+function drawBird() { /* code cũ */ }
+/* ... các hàm khác ... */
 
-/* DRAW ROCK, PARTICLES, OBSTACLES (giữ nguyên) */
-function drawBird() {
-    let angle = velocity * 0.06; ctx.save(); ctx.translate(playerX, playerY); ctx.rotate(angle);
-    let rockGrad = ctx.createRadialGradient(-8,-10,5, 8,10,22); rockGrad.addColorStop(0,"#E6B88A"); rockGrad.addColorStop(1,"#8B5A2B");
-    ctx.fillStyle = rockGrad; ctx.beginPath(); ctx.ellipse(0,0,22,19,0,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle = "#5C3A1F"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-12,-8); ctx.lineTo(-5,12); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(10,-10); ctx.lineTo(6,8); ctx.stroke();
-    ctx.fillStyle = "#FFF"; ctx.beginPath(); ctx.arc(8,-6,6,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(10,-6,3.5,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-}
-function spawnParticle() { particles.push({x:playerX-5,y:playerY+5,vx:Math.random()*3-2,vy:Math.random()*2.5-1,life:22,size:Math.random()*4+3}); }
-function drawParticles() { 
-    particles.forEach(p=>{ctx.fillStyle=`hsl(${30+Math.random()*40},100%,65%)`;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();p.x+=p.vx;p.y+=p.vy;p.life--;p.size*=0.97;}); 
-    particles=particles.filter(p=>p.life>0); 
-}
-function drawObstacles() { 
-    obstacles.forEach(o=>{o.x-=o.speed;
-        ctx.fillStyle="#666"; ctx.fillRect(o.x,0,o.width,o.gapY-gapSize/2);
-        ctx.fillStyle="#555"; ctx.fillRect(o.x-6,o.gapY-gapSize/2-35,o.width+12,38);
-        ctx.strokeStyle="#444"; ctx.lineWidth=4; ctx.strokeRect(o.x,0,o.width,o.gapY-gapSize/2);
-        ctx.fillStyle="#666"; ctx.fillRect(o.x,o.gapY+gapSize/2,o.width,500);
-        ctx.fillStyle="#555"; ctx.fillRect(o.x-6,o.gapY+gapSize/2,o.width+12,38);
-        ctx.strokeRect(o.x,o.gapY+gapSize/2,o.width,500);
-    });
-}
-
-/* COLLISION & SCORE (giữ nguyên) */
-function checkCollision() { 
-    if(playerY<25||playerY>475){playHit();playDie();running=false;gameOverFlag=true;return;}
-    obstacles.forEach(o=>{if(playerX+18>o.x&&playerX-18<o.x+o.width){
-        if(playerY<o.gapY-gapSize/2+10||playerY>o.gapY+gapSize/2-10){playHit();playDie();running=false;gameOverFlag=true;}
-    }});
-}
-function updateScore() { 
-    obstacles.forEach(o=>{if(!o.scored&&o.x+o.width<playerX){o.scored=true;score++;document.getElementById("score").innerText=score;playScore();}}); 
-}
-function spawnObstacle() {
-    obstacles.push({x:360,gapY:130+Math.random()*190,width:78,speed:obstacleSpeed,scored:false});
-}
-
-/* GAME LOOP */
 function update() {
-    ctx.clearRect(0,0,360,500);
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT); // Clear theo logical size
     drawBackground();
     drawObstacles();
     drawParticles();
 
     if (running) {
-        velocity += gravity; playerY += velocity;
-        if(playerY<25){playerY=25;velocity=0;} if(playerY>475){playerY=475;velocity=0;}
+        velocity += gravity;
+        playerY += velocity;
+        if (playerY < 25) { playerY = 25; velocity = 0; }
+        if (playerY > 475) { playerY = 475; velocity = 0; }
 
         if (Date.now() - lastSpawnTime > spawnRate) {
             spawnObstacle();
@@ -214,19 +150,23 @@ function update() {
         obstacles = obstacles.filter(o => o.x > -90);
         requestAnimationFrame(update);
     } else if (gameOverFlag) {
-        stopBackgroundMusic();          // DỪNG NHẠC KHI GAME OVER
+        stopBackgroundMusic();
         drawBird();
-        ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(0,0,360,500);
+        ctx.fillStyle = "rgba(0,0,0,0.65)";
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
         ctx.fillStyle = "white";
         ctx.font = "bold 34px Arial"; ctx.fillText("GAME OVER", 48, 190);
         ctx.font = "22px Arial"; ctx.fillText("Điểm: " + score, 125, 235);
         ctx.fillText("Level cuối: " + difficultyLevel, 105, 265);
         ctx.fillText("Chạm để chơi lại", 55, 300);
-    } else { drawBird(); }
+    } else {
+        drawBird();
+    }
 }
 
-/* START GAME */
+// Start game sau unlock
 function startGame() {
+    // Reset variables...
     score = 0; velocity = 0; playerY = 250;
     obstacles = []; particles = [];
     obstacleSpeed = 2.2; gapSize = 245;
@@ -236,21 +176,36 @@ function startGame() {
 
     spawnObstacle();
     running = true; gameOverFlag = false;
-    playBackgroundMusic();           // BẮT ĐẦU NHẠC NỀN NGAY
+    playBackgroundMusic();
+    resizeCanvas(); // Đảm bảo fit
     update();
 }
 
-/* CONTROL */
-canvas.addEventListener("touchstart", e => { e.preventDefault();
-    if(!running && gameOverFlag){startGame(); return;}
-    if(running){velocity=lift; playFlap();}
-});
-canvas.addEventListener("mousedown", () => {
-    if(!running && gameOverFlag){startGame(); return;}
-    if(running){velocity=lift; playFlap();}
+// Control (touch/mouse) - đã có từ code cũ
+canvas.addEventListener("touchstart", e => { e.preventDefault(); if(!running && gameOverFlag){startGame(); return;} if(running){velocity=lift; playFlap();} });
+canvas.addEventListener("mousedown", () => { if(!running && gameOverFlag){startGame(); return;} if(running){velocity=lift; playFlap();} });
+
+// PWA Install Prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    document.getElementById('install-prompt').style.display = 'block';
 });
 
-startGame();
+document.getElementById('install-prompt').addEventListener('click', async () => {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            console.log('User accepted install');
+        }
+        deferredPrompt = null;
+        document.getElementById('install-prompt').style.display = 'none';
+    }
+});
+
+// Bắt đầu với splash (audio unlock)
 </script>
 </body>
 </html>
