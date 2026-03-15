@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>Flappy Rock 2</title>
+<title>Flappy Rock PRO MAX</title>
 <style>
 body{margin:0;background:#000;font-family:Arial;text-align:center;overflow:hidden;color:white;}
 canvas{border:4px solid #fff;border-radius:15px;box-shadow:0 0 60px rgba(255,69,0,0.6);}
@@ -16,6 +16,22 @@ h2{margin:15px 0;font-size:2.3em;text-shadow:0 0 15px #FF4500;}
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+function resizeGame(){
+    const ratio = 360/520;
+    let w = window.innerWidth * 0.95;
+    let h = w / ratio;
+
+    if(h > window.innerHeight * 0.85){
+        h = window.innerHeight * 0.85;
+        w = h * ratio;
+    }
+
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+}
+
+window.addEventListener("resize", resizeGame);
+resizeGame();
 
 // ====================== AUDIO ======================
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -296,7 +312,7 @@ function update(currentTime=0) {
 }
 
 // ====================== CONTROLS ======================
-canvas.addEventListener("mousedown", e => {
+canvas.addEventListener("pointerdown", e => {
     const y = e.offsetY;
     if(gameState==="menu"){
         if(y>215&&y<265) startGame();
