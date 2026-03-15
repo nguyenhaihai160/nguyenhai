@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Flappy Rock 2</title>
+<style>
+body{margin:0;background:#000;font-family:Arial;text-align:center;overflow:hidden;color:white;}
+canvas{border:4px solid #fff;border-radius:15px;box-shadow:0 0 60px rgba(255,69,0,0.6);}
+h2{margin:15px 0;font-size:2.3em;text-shadow:0 0 15px #FF4500;}
+</style>
+</head>
+<body>
+<h2>🪨 FLAPPY ROCK PRO MAX 🌋❄️</h2>
+<canvas id="game" width="360" height="520"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ====================== AUDIO ======================
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playFlap() {
+    const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+    osc.type = "sine"; osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 0.12);
+    gain.gain.value = 0.35; gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+    osc.connect(gain).connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+}
+function playDie() {
+    const noise = audioCtx.createBufferSource();
+    const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.6, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+    noise.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 800;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.8; gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.7);
+    noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start();
+}
+function playFireSound() {
+    const noise = audioCtx.createBufferSource();
+    const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.25, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < buffer.length; i++) data[i] = Math.random() * 2 - 1;
+    noise.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter(); filter.type = "bandpass"; filter.frequency.value = 1800; filter.Q.value = 2;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.45; gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+    noise.connect(filter).connect(gain).connect(audioCtx.destination); noise.start();
+}
+
+// ====================== GAME STATE ======================
+let gameState = "menu", lastTime = 0, spawnTimer = 0, fireTimer = 0;
+const SPAWN_INTERVAL = 1450;
+let playerX = 120, playerY = 250, velocity = 0, rotation = 0;
+const gravity = 0.5;   // ← tăng nhẹ để rơi chắc hơn
+const lift = -8;     // ← GIẢM ĐỘ NẢY (trước là -13)
+let score = 0, best = parseInt(localStorage.getItem("best")) || 0;
+let coins = parseInt(localStorage.getItem("coins")) || 0;
+let skin = localStorage.getItem("skin") || "normal";
+let leaderboard = JSON.parse(localStorage.getItem("leaderboard")) || [];
+function saveLeaderboard() { if(score>0) leaderboard.push(score); leaderboard.sort((a,b)=>b-a); leaderboard=leaderboard.slice(0,5); localStorage.setItem("leaderboard", JSON.stringify(leaderboard)); }
+
+// ====================== OBSTACLES & PARTICLES ======================
+let obstacles = [], particles = [];
+const gapSize = 205, obstacleSpeed = 2.65;
+
+function spawnObstacle() {
+    obstacles.push({x:360, gapY:145+Math.random()*205, width:68, scored:false});
+    playFireSound();
+}
+
+function spawnParticles(x,y,count,hue) {
+    for(let i=0;i<count;i++){
+        const angle=Math.random()*Math.PI*2;
+        const speed=1.8+Math.random()*4.5;
+        particles.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-2.5,life:38+Math.random()*22,size:3.5+Math.random()*4,hue,alpha:1});
+    }
+}
+
+// ====================== BACKGROUND ======================
+let groundX = 0;
+let clouds = [{x:50,y:70,size:1.2,speed:0.45},{x:200,y:40,size:0.95,speed:0.52},{x:320,y:90,size:1.35,speed:0.38},{x:480,y:60,size:1.05,speed:0.48}];
+const skyGradient = ctx.createLinearGradient(0,0,0,520);
+skyGradient.addColorStop(0,"#1A237E");skyGradient.addColorStop(0.25,"#7B1FA2");skyGradient.addColorStop(0.5,"#FF5722");skyGradient.addColorStop(0.75,"#FF9800");skyGradient.addColorStop(1,"#FFF176");
+
+function drawBackground(delta) {
+    ctx.fillStyle=skyGradient; ctx.fillRect(0,0,360,520);
+    ctx.save(); ctx.shadowColor="#FFEB3B"; ctx.shadowBlur=55;
+    ctx.fillStyle="#FFCA28"; ctx.beginPath(); ctx.arc(280,140,52,0,Math.PI*2); ctx.fill(); ctx.restore();
+
+    ctx.fillStyle="#5E35B1"; ctx.beginPath(); ctx.moveTo(0,420); ctx.quadraticCurveTo(100,300,200,410); ctx.quadraticCurveTo(280,320,360,390); ctx.lineTo(360,440); ctx.lineTo(0,440); ctx.fill();
+    ctx.fillStyle="#7E57C2"; ctx.beginPath(); ctx.moveTo(-40,430); ctx.quadraticCurveTo(60,340,180,400); ctx.quadraticCurveTo(260,330,400,380); ctx.lineTo(360,440); ctx.lineTo(0,440); ctx.fill();
+
+    ctx.fillStyle="rgba(255,235,238,0.92)";
+    clouds.forEach(c=>{ctx.beginPath();ctx.ellipse(c.x,c.y,45*c.size,28*c.size,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(c.x+28*c.size,c.y-12*c.size,32*c.size,25*c.size,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(c.x-25*c.size,c.y-10*c.size,30*c.size,22*c.size,0,0,Math.PI*2);ctx.fill(); c.x-=c.speed*delta; if(c.x<-150)c.x=510;});
+
+    ctx.fillStyle="#4E342E";ctx.fillRect(groundX,440,720,80);
+    ctx.fillStyle="#388E3C";ctx.fillRect(groundX,430,720,18);
+    ctx.strokeStyle="#2E7D32";ctx.lineWidth=3;
+    for(let i=0;i<400;i+=18){let gx=(groundX+i)%720;if(gx<0)gx+=720;ctx.beginPath();ctx.moveTo(gx+6,440);ctx.lineTo(gx-6,410);ctx.stroke();
+    if(i%60===0){ctx.fillStyle="#616161";ctx.beginPath();ctx.arc(gx+12,435,8,0,Math.PI*2);ctx.fill();}}
+    groundX-=3.1*delta;if(groundX<=-360)groundX=0;
+}
+
+// ====================== CỘT ĐÁ LỬA ======================
+function drawFirePillar(x, topY, height, isTop) {
+    const grad = ctx.createLinearGradient(x, topY, x+68, topY+height);
+    grad.addColorStop(0, isTop ? "#FF4500" : "#8B0000");
+    grad.addColorStop(0.35, "#FF8C00");
+    grad.addColorStop(0.65, "#B22222");
+    grad.addColorStop(1, "#4B0000");
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, topY, 68, height);
+
+    ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(x+16, topY+12); ctx.lineTo(x+39, topY+height-35); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+52, topY+28); ctx.lineTo(x+19, topY+height-52); ctx.stroke();
+
+    ctx.shadowColor = "#FF4500"; ctx.shadowBlur = 32;
+    ctx.fillStyle = "rgba(255,100,0,0.85)";
+    ctx.fillRect(x+10, topY+6, 48, height-15);
+    ctx.shadowBlur = 0;
+
+    if (isTop) {
+        ctx.shadowColor = "#FFEE00"; ctx.shadowBlur = 48;
+        ctx.fillStyle = "#FF4500";
+        ctx.beginPath(); ctx.moveTo(x+5, topY+3); ctx.lineTo(x+34, topY-52); ctx.lineTo(x+61, topY+3); ctx.fill();
+        ctx.fillStyle = "#FFEA00";
+        ctx.beginPath(); ctx.moveTo(x+16, topY-12); ctx.lineTo(x+34, topY-65); ctx.lineTo(x+50, topY-12); ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+}
+
+function drawObstacles() {
+    obstacles.forEach(o => {
+        o.x -= obstacleSpeed;
+        const upperHeight = o.gapY - gapSize/2 + 20;
+        drawFirePillar(o.x, 0, upperHeight, true);
+        const lowerY = o.gapY + gapSize/2 - 20;
+        const lowerHeight = 520 - lowerY + 30;
+        drawFirePillar(o.x, lowerY, lowerHeight, false);
+    });
+}
+
+// ====================== NHÂN VẬT ======================
+function drawRock() {
+    ctx.save();
+    ctx.translate(playerX, playerY);
+    ctx.rotate(rotation);
+
+    let grad;
+    switch(skin) {
+        case "gold": grad = ctx.createRadialGradient(-10,-10,4,12,12,26); grad.addColorStop(0,"#FFEEAA"); grad.addColorStop(0.5,"#FFCC33"); grad.addColorStop(1,"#CC8800"); ctx.shadowColor = "#FFEE77"; ctx.shadowBlur = 25; break;
+        case "diamond": grad = ctx.createRadialGradient(-12,-12,3,14,14,29); grad.addColorStop(0,"#E0FFFF"); grad.addColorStop(0.4,"#A0E0FF"); grad.addColorStop(1,"#2080FF"); ctx.shadowColor = "#80FFFF"; ctx.shadowBlur = 28; break;
+        case "fire": grad = ctx.createRadialGradient(-9,-9,5,11,11,27); grad.addColorStop(0,"#FFEE44"); grad.addColorStop(0.3,"#FF5500"); grad.addColorStop(1,"#AA0000"); ctx.shadowColor = "#FF3300"; ctx.shadowBlur = 32; break;
+        case "ice": grad = ctx.createRadialGradient(-11,-11,4,13,13,28); grad.addColorStop(0,"#E0F8FF"); grad.addColorStop(0.5,"#81D4FA"); grad.addColorStop(1,"#0277BD"); ctx.shadowColor = "#80E0FF"; ctx.shadowBlur = 26; break;
+        default: grad = ctx.createRadialGradient(-8,-8,5,10,10,25); grad.addColorStop(0,"#F0D0A0"); grad.addColorStop(1,"#8B5A2B");
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0,0,22,0,Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle = "rgba(60,30,10,0.5)"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(-13,8); ctx.quadraticCurveTo(-4,13,12,-6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10,-11); ctx.quadraticCurveTo(4,5,-11,10); ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.8)";
+    ctx.beginPath(); ctx.arc(-9,-9,9,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle = "#111";
+    ctx.beginPath(); ctx.ellipse(7,-5,5.5,7,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-5,-4,5,6.5,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#FFF";
+    ctx.beginPath(); ctx.arc(8.5,-7,2.2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-3.5,-6,2,0,Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0,6,6,0.6,2.5); ctx.stroke();
+
+    if (skin === "fire") {
+        ctx.shadowBlur = 15; ctx.shadowColor = "#FF6600";
+        ctx.fillStyle = "#FFAA00";
+        ctx.beginPath(); ctx.moveTo(-18,-12); ctx.lineTo(-26,-27); ctx.lineTo(-13,-21); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(18,10); ctx.lineTo(27,19); ctx.lineTo(14,23); ctx.fill();
+    }
+    if (skin === "ice") {
+        ctx.shadowBlur = 12; ctx.shadowColor = "#FFFFFF";
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillRect(-16,-18,4,4); ctx.fillRect(13,5,3,3); ctx.fillRect(-8,12,3.5,3.5);
+    }
+    ctx.restore();
+}
+
+// ====================== PARTICLES ======================
+function drawParticles() {
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.x+=p.vx; p.y+=p.vy; p.vy+=0.16; p.life--; p.alpha=p.life/45;
+        ctx.save();
+        ctx.globalAlpha=p.alpha;
+        ctx.fillStyle=`hsl(${p.hue},100%,55%)`;
+        ctx.fillRect(p.x,p.y,p.size,p.size);
+        ctx.restore();
+        if(p.life<=0) particles.splice(i,1);
+    }
+}
+
+// ====================== LOGIC ======================
+function checkCollision() {
+    if (playerY < 20 || playerY > 480) { gameOver(); return; }
+    for (let i = 0; i < obstacles.length; i++) {
+        let o = obstacles[i];
+        if (playerX + 20 > o.x && playerX - 20 < o.x + o.width) {
+            if (playerY < o.gapY - gapSize/2 + 10 || playerY > o.gapY + gapSize/2 - 10) {
+                gameOver(); return;
+            }
+        }
+    }
+}
+function updateScore() {
+    for (let i = 0; i < obstacles.length; i++) {
+        let o = obstacles[i];
+        if (!o.scored && o.x + o.width < playerX) { o.scored = true; score++; coins++; localStorage.setItem("coins", coins); }
+    }
+}
+function gameOver() {
+    playDie();
+    spawnParticles(playerX, playerY, 52, skin==="fire"?15:30);
+    gameState = "gameover";
+    if (score > best) best = score;
+    localStorage.setItem("best", best);
+    saveLeaderboard();
+}
+
+function drawMenu() {
+    ctx.fillStyle = "rgba(0,0,0,0.78)"; ctx.fillRect(0,0,360,520);
+    ctx.fillStyle = "white";
+    ctx.font = "bold 39px Arial"; ctx.fillText("FLAPPY ROCK", 38, 155);
+    ctx.font = "29px Arial"; ctx.fillText("PLAY", 145, 245); ctx.fillText("SHOP", 145, 290);
+    ctx.font = "20px Arial"; ctx.fillText("Best: " + best, 122, 345); ctx.fillText("Coins: " + coins, 122, 375);
+    ctx.font = "18px Arial"; ctx.fillText("🏆 TOP 5", 130, 415);
+    ctx.font = "16px Arial";
+    for (let i = 0; i < 5; i++) ctx.fillText((i+1)+". "+(leaderboard[i]||0), 132, 440 + i*23);
+}
+function drawShop() {
+    ctx.fillStyle = "rgba(0,0,0,0.78)"; ctx.fillRect(0,0,360,520);
+    ctx.fillStyle = "white"; ctx.font = "33px Arial"; ctx.fillText("SHOP", 135, 80);
+    const s = [{n:"Normal",c:0,k:"normal"},{n:"Gold",c:50,k:"gold"},{n:"Diamond",c:80,k:"diamond"},{n:"Fire",c:120,k:"fire"},{n:"Ice",c:150,k:"ice"}];
+    ctx.font = "21px Arial";
+    s.forEach((sk,i)=>{ctx.fillText(sk.n+" - "+sk.c+" coins",75,145+i*55); if(skin===sk.k)ctx.fillText("✓",280,145+i*55);});
+    ctx.font="18px Arial"; ctx.fillText("Tap skin để mua/đổi",78,410); ctx.fillText("Tap trên để về Menu",82,445);
+}
+
+// ====================== MAIN LOOP ======================
+function update(currentTime=0) {
+    if(!lastTime)lastTime=currentTime;
+    const delta = Math.min((currentTime-lastTime)/16.67, 2);
+    lastTime = currentTime;
+    ctx.clearRect(0,0,360,520);
+
+    if(gameState==="menu") drawMenu();
+    else if(gameState==="shop") drawShop();
+    else if(gameState==="game") {
+        drawBackground(delta);
+        velocity += gravity * delta;
+        playerY += velocity * delta;
+        rotation = Math.min(Math.max(velocity * 0.052, -0.85), 1.25); // giảm độ xoay
+
+        drawObstacles();
+        drawRock();
+        drawParticles();
+        checkCollision();
+        updateScore();
+
+        spawnTimer += 16.67 * delta;
+        fireTimer += delta;
+        if (fireTimer > 18) { playFireSound(); fireTimer = 0; }
+
+        if(spawnTimer > SPAWN_INTERVAL){spawnObstacle(); spawnTimer=0;}
+        for(let i=obstacles.length-1;i>=0;i--) if(obstacles[i].x < -100) obstacles.splice(i,1);
+
+        ctx.fillStyle="white"; ctx.font="bold 23px Arial";
+        ctx.fillText("Score: "+score,16,36); ctx.fillText("Coins: "+coins,235,36);
+    }
+    else if(gameState==="gameover") {
+        drawBackground(delta);
+        drawRock();
+        drawParticles();
+        ctx.fillStyle="rgba(0,0,0,0.68)"; ctx.fillRect(0,0,360,520);
+        ctx.fillStyle="#FF4500"; ctx.font="bold 41px Arial"; ctx.fillText("GAME OVER",38,215);
+        ctx.fillStyle="white"; ctx.font="27px Arial";
+        ctx.fillText("Score: "+score,108,265); ctx.fillText("Best: "+best,108,300);
+        ctx.font="23px Arial"; ctx.fillText("Tap để chơi lại",85,350);
+    }
+    requestAnimationFrame(update);
+}
+
+// ====================== CONTROLS ======================
+canvas.addEventListener("mousedown", e => {
+    const y = e.offsetY;
+    if(gameState==="menu"){
+        if(y>215&&y<265) startGame();
+        if(y>275&&y<315) gameState="shop";
+    }
+    else if(gameState==="shop"){
+        if(y<100){gameState="menu";return;}
+        if(y>120&&y<170){skin="normal";localStorage.setItem("skin","normal");}
+        if(y>175&&y<225&&coins>=50){coins-=50;skin="gold";localStorage.setItem("coins",coins);localStorage.setItem("skin","gold");}
+        if(y>230&&y<280&&coins>=80){coins-=80;skin="diamond";localStorage.setItem("coins",coins);localStorage.setItem("skin","diamond");}
+        if(y>285&&y<335&&coins>=120){coins-=120;skin="fire";localStorage.setItem("coins",coins);localStorage.setItem("skin","fire");}
+        if(y>340&&y<390&&coins>=150){coins-=150;skin="ice";localStorage.setItem("coins",coins);localStorage.setItem("skin","ice");}
+    }
+    else if(gameState==="game"){
+        velocity = lift; playFlap();
+    }
+    else if(gameState==="gameover"){
+        startGame();
+    }
+});
+
+function startGame() {
+    score=0; velocity=0; playerY=250; rotation=0;
+    obstacles=[]; particles=[]; spawnTimer=0; fireTimer=0;
+    gameState="game";
+}
+
+requestAnimationFrame(update);
+</script>
+</body>
+</html>
